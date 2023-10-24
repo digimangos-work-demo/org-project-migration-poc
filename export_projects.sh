@@ -16,7 +16,7 @@ create_export_path() {
         mkdir -p "${export_path}"
         echo "Created export path: ${export_path}"
     else
-        echo "Export path ${export_path} already exists please delete it or specify a new path."
+        echo "Export path ${export_path} already exists. Please delete it or specify a new path."
         exit 1
     fi
 }
@@ -25,6 +25,8 @@ create_export_path() {
 export_projects() {
     local org=$1
     local export_path=$2
+
+    # Execute gh project list and export the result
     gh project list --owner "${org}" --format json > "${export_path}/projects_list.json"
     echo "Exported project list for ${org} to ${export_path}/projects_list.json"
 }
@@ -33,20 +35,25 @@ export_projects() {
 export_project_items() {
     local org=$1
     local export_path=$2
+    local projects_file="${export_path}/projects_list.json"
 
-    # Read the projects_list.json file
-    projects_file="${export_path}/projects_list.json"
-    if [ -f "${projects_file}" ]; then
-        projects=$(jq -r '.projects | .[] | .number' "${projects_file}")
-        for project_number in ${projects}; do
-            # Execute gh project item-list and export it
-            gh project item-list "${project_number}" --owner "${org}" --format json > "${export_path}/project_${project_number}_items.json"
-            echo "Exported project ${project_number} items to ${export_path}/project_${project_number}_items.json"
-        done
-    else
+    # Check if the projects_list.json file exists
+    if [ ! -f "${projects_file}" ]; then
         echo "projects_list.json file not found at ${projects_file}. Please export projects first."
         exit 1
     fi
+
+    # Iterate through project numbers and export items and fields
+    projects=$(jq -r '.projects[].number' "${projects_file}")
+    for project_number in ${projects}; do
+        # Execute gh project item-list and export it
+        gh project item-list "${project_number}" --owner "${org}" --format json > "${export_path}/project_${project_number}_items.json"
+        echo "Exported project ${project_number} items to ${export_path}/project_${project_number}_items.json"
+
+        # Execute gh project field-list and export it
+        gh project field-list "${project_number}" --owner "${org}" --format json > "${export_path}/project_${project_number}_fields.json"
+        echo "Exported project ${project_number} fields to ${export_path}/project_${project_number}_fields.json"
+    done
 }
 
 # Parse command line options
@@ -87,12 +94,11 @@ compare_versions() {
     local ver2=$2
     if [[ "$ver1" == "$ver2" ]]; then
         return 0  # Versions are equal
-    elif [[ $(printf "${ver1}\n${ver2}" | sort -V | tail -n 1) == "$ver1" ]]; then
+    elif [[ $(printf "${ver1}\n${ver2}" | sort -V | tail -n 1) == "$ver2" ]]; then
         echo "Installed GitHub CLI version (${ver1}) is older than the required version (${ver2})."
         exit 1
     fi
 }
-
 
 # Compare versions
 compare_versions "${installed_version}" "${required_version}"
@@ -105,4 +111,3 @@ export_projects "${org_name}" "${export_path}"
 
 # Export project items if the organization and export path are provided
 export_project_items "${org_name}" "${export_path}"
-

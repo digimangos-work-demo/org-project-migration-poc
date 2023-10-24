@@ -1,6 +1,7 @@
 #!/bin/bash
 
 # Ensure you have authenticated with GitHub CLI using `gh auth login` before running this script.
+# And added the required project scope using `gh auth refresh -s project`
 
 # Initialize variables with default values
 target_org=""

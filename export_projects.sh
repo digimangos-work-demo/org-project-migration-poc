@@ -10,6 +10,25 @@ show_usage() {
     echo "Usage: $0 -o <organization_name> [-p <export_path>]"
 }
 
+repos_query=$(cat <<EOF
+query (\$id: ID!, \$endCursor: String) {
+	node (id: \$id) {
+		... on ProjectV2 {
+			repositories (first: 1, after: \$endCursor) {
+				pageInfo {
+					endCursor
+					hasNextPage
+				}
+				nodes {
+					nameWithOwner
+				}
+			}
+		}
+	}
+}
+EOF
+)
+
 # Function to create the export folder if it doesn't exist
 create_export_path() {
     if [ ! -d "${export_path}" ]; then
@@ -36,6 +55,7 @@ export_project_items() {
     local org=$1
     local export_path=$2
     local projects_file="${export_path}/projects_list.json"
+    local project_id=""
 
     # Check if the projects_list.json file exists
     if [ ! -f "${projects_file}" ]; then
@@ -46,6 +66,9 @@ export_project_items() {
     # Iterate through project numbers and export items and fields
     projects=$(jq -r '.projects[].number' "${projects_file}")
     for project_number in ${projects}; do
+        # Get the project ID
+        project_id=$(jq -r ".projects[] | select(.number == ${project_number}) | .id" "${projects_file}")
+
         # Execute gh project item-list and export it
         gh project item-list "${project_number}" --owner "${org}" --format json > "${export_path}/project_${project_number}_items.json"
         echo "Exported project ${project_number} items to ${export_path}/project_${project_number}_items.json"
@@ -53,6 +76,10 @@ export_project_items() {
         # Execute gh project field-list and export it
         gh project field-list "${project_number}" --owner "${org}" --format json > "${export_path}/project_${project_number}_fields.json"
         echo "Exported project ${project_number} fields to ${export_path}/project_${project_number}_fields.json"
+
+        # Export project repositories
+        gh api graphql --paginate -f query="${repos_query}" -f id="${project_id}" | jq -s '[.[] | .data.node.repositories.nodes[].nameWithOwner]' > "${export_path}/project_${project_number}_repos.json"
+        echo "Exported project ${project_number} repositories to ${export_path}/project_${project_number}_repos.json"
     done
 }
 

@@ -62,6 +62,27 @@ query (\$owner: String!, \$project_number: Int!, \$cursor: String) {
 EOF
 )
 
+# GraphQL query to repo id
+repo_id_query=$(cat <<EOF
+    query (\$owner: String!, \$name: String!) {
+        repository(owner: \$owner, name: \$name) {
+            id
+        }
+    }
+EOF
+)
+
+
+# link project to repo mutation
+link_repo_mutation=$(cat <<EOF
+    mutation (\$projectId: ID!, \$repositoryId: ID!) {
+        linkProjectV2ToRepository (input: { projectId: \$projectId, repositoryId: \$repositoryId }) {
+            clientMutationId
+        }
+    }
+EOF
+)
+
 # Function to display script usage
 show_usage() {
     echo "Usage: $0 -o <target_organization> [-m <repository_mapping_file>] [-p <projects_list_file>] [-i <import_path>] [-n] [-s <specific_project_number>]"
@@ -291,6 +312,39 @@ link_old_issues() {
     fi
 }
 
+# Link repositories to new projects
+link_repos() {
+    local project_number="$1"
+    local output_file="${import_path}/project_${project_number}_copy_output.json"
+    local repos_file="${import_path}/project_${project_number}_repos.json"
+    local repositoryId=""
+    local remapped=""
+
+    local repos=$(jq -r '.[] | .' "${repos_file}")
+    local new_project_id=$(jq -r '.id' "${output_file}")
+
+    while read -r owner_repo; do
+      repositoryId=""
+      remapped=$(remapped_repo_from_owner_repo "${owner_repo}")
+
+      repositoryId=$(gh api graphql -F owner="${target_org}" -F name="${remapped}" -f query="${repo_id_query}" | jq -r '.data.repository.id')
+      if [ -z "${repositoryId}" ] || [ "${repositoryId}" == null ]; then
+        echo "Repository ${remapped} not found in ${target_org} and will be skipped."
+      else
+        echo "Linking repository ${remapped} to project in ${target_org}..."
+        gh api graphql -F projectId="${new_project_id}" -F repositoryId="${repositoryId}" -f query="${link_repo_mutation}" > /dev/null
+      fi
+    done <<< "${repos}"
+}
+
+# Function to remap org-owner
+remapped_repo_from_owner_repo() {
+    local repo="$1"
+    local original_repo=$(echo "${repo}" | awk -F'/' '{print $2}')
+    local remapped_repo=$(remap_repository "${original_repo}" "${mapping_file}")
+    echo "${remapped_repo}"
+}
+
 # Function to remap the issue URL
 remap_issue_url() {
     local issue_url="$1"
@@ -336,5 +390,6 @@ while IFS=$'\t' read -r project_number title source_org; do
         copy_project "${project_number}" "${source_org}" "${title}"
         export_project_fields "${project_number}"
         link_old_issues "${project_number}"
+        link_repos "${project_number}"
     fi
 done <<< "${project_info}"
